@@ -22,22 +22,21 @@ title: louieholbrook
 email: louieholbrook782@gmail.com
 #author:
 #  name: Louie Holbrook
-#  email: "louieholbrook782@gmail.com"
+#  email: "louieholbrook782@gmail.com!
 description: >- # this means to ignore newlines until "baseurl:"
-  CTF Walkthroughs, Pen Testing Articles and more!
+  Comprehensive CTF walkthroughs and pen testing articles!
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "" # the base hostname & protocol for your site, e.g. http://example.com
-twitter_username: jekyllrb
 github_username:  LouieAh
 
+
 # Build settings
-theme: jekyll-theme-hacker
-#theme: minima
-#minima:
-#  skin: dark
-#  social links:
-#    github: LouieAh
-#    linkedin: louieah
+theme: minima
+minima:
+ skin: dark
+ social links:
+   github: LouieAh
+   linkedin: louieah
 #ignore_theme_config: true
 plugins:
   - jekyll-feed

