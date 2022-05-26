@@ -9,6 +9,8 @@ categories: walkthroughs tryhackme
 tags: walkthroughs tryhackme
 ---
 
+{% include link.html href="https://tryhackme.com/room/overpass3hosting" text="TryHackMe - 'Overpass 3 - Hosting'" %}
+
 ## Nmap scan
 
 Scan with Nmap to see what services are open.
@@ -191,10 +193,6 @@ The second command returned a `web.flag` file located at :
 /usr/share/httpd/web.flag
 {% endhighlight %}
 
-Web Flag:
-
-{% include answer.html answer="thm{0ae72f7870c3687129f7a824194be09d}" %}
-
 ## User Flag
 
 I used `su` to see if I could change to one of the users whos credentials we got from the `xlsx` file, and it worked.
@@ -226,8 +224,6 @@ $ echo "<public-key>" >> authorized_keys
 I've now logged in as `paradox` using SSH.
 
 ![Logging in as paradox using SSH](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-12 at 06.29.01.png)
-
-### Flag Finding
 
 Using the same `find` commands previously used to search for flag files didn't return anything.
 
@@ -329,6 +325,8 @@ Once mounted, I moved into `tmp/share` directory.
 
 ![Mounted root directory contents](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-18 at 05.33.07.png)
 
+It contained the user flag.
+
 Given what was inside the `.ssh` directory, I can now log in as the user `james` by either:
 1. Adding my public key to the `authorized_keys` directory (we can do this because the NFS share gives read and write privileges).
 2. Using the `id_rsa` private key file whilst logging in as `james`.
@@ -381,5 +379,3 @@ I finally obtained root!
 ![Optaining root](/assets/posts/2022-04-30-overpass3/Screenshot 2022-05-24 at 06.48.16.png)
 
 I navigated to the `/root` directory and found the root flag.
-
-{% include answer.html answer="thm{a4f6adb70371a4bceb32988417456c44}" %}
